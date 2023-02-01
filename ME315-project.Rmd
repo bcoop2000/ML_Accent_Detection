@@ -1,0 +1,497 @@
+---
+title: "ME315 Project"
+author: "Brian"
+date: '2022-06-27'
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+library(ISLR)
+library(tidyverse)
+library(mclust)
+library(GGally)
+library(MASS)
+library(class)
+library(xfun)
+library(tree)
+library(randomForest)
+```
+
+
+### data cleaning and prep ###
+```{r}
+set.seed(42)
+accents <- read.csv("accent.recognition.csv")
+accents.data <- accents[,-1]
+accents.labels <- accents[,1]
+
+subset <- sample(1:nrow(accents), 50)
+test.accents <- accents[subset,]
+train.accents <- accents[-subset,]
+
+
+label.colors <- character(nrow(iris))
+label.colors[] <- "black"
+label.colors[accents.labels == "ES"] <- "red"
+label.colors[accents.labels == "GE"] <- "blue"
+label.colors[accents.labels == "IT"] <- "green"
+label.colors[accents.labels == "FR"] <- "brown"
+label.colors[accents.labels == "US"] <- "purple"
+label.colors[accents.labels == "UK"] <- "orange"
+
+test.accents.data <- test.accents[,-1]
+test.accents.labels <- test.accents[,1]
+train.accents.data <- train.accents[,-1]
+train.accents.labels <- train.accents[,1]
+
+hist(accents.data[,1])
+hist(accents.data[,2])
+hist(accents.data[,3])
+```
+
+
+```{r}
+# ggpairs(accents, 
+#         ggplot2::aes(colour=language),
+#         upper = list(continuous = wrap("density", alpha = 0.5), combo = "box"),
+#         lower = list(continuous = wrap("points", alpha = 0.3,    size=0.1), 
+#               combo = wrap("dot", alpha = 0.4,            size=0.2) ),
+#         title = "Accents")
+# 
+# cor <- round(cor(accents.data), 2)
+# write.table(cor, file = "cor_table.txt", sep = ",", quote = FALSE, row.names = T)
+```
+
+
+```{r}
+accents.summary <- accents%>%
+  group_by(language)%>%
+  summarize(number = n(),
+            average = mean(X1+X2+X3+X4+X5+X6+X7+X8+X9+X10+X11+X12), 
+            "standard deviation" = sd(X1+X2+X3+X4+X5+X6+X7+X8+X9+X10+X11+X12))
+### figure 1 ###
+sum.table <- accents.summary
+write.table(sum.table, file = "sum.table.txt", sep = ",", quote=F, row.names = F)
+
+## take average of scores for each language and show in plot
+```
+
+how linked are the coefficients to a latent set of factors...
+
+#### part 1: classification using supervised learning  ####
+
+```{r}
+set.seed(42)
+lda.fit <-  lda(language ~ ., data = train.accents)
+lda.pred <-  predict(lda.fit, test.accents)
+lda.accuracy <- mean(lda.pred$class == test.accents.labels)
+lda.fit
+lda.confusion <- table(lda.pred$class, test.accents.labels)
+write.table(lda.confusion, file = "lda.confusion.txt", sep = ",", quote=F, row.names = T)
+```
+
+```{r}
+set.seed(42)
+qda.accuracy <- 0
+qda.fit <-  qda(language ~ ., data = train.accents)
+qda.pred <-  predict(qda.fit, test.accents)
+qda.accuracy <- mean(qda.pred$class == test.accents.labels)
+qda.fit
+qda.confusion <- table(qda.pred$class, test.accents.labels)
+write.table(qda.confusion, file = "qda.confusion.txt", sep = ",", quote=F, row.names = T)
+```
+
+```{r}
+library(nnet)
+set.seed(42)
+multinom.fit <-  multinom(language ~ ., data = train.accents)
+multinom.pred <-  predict(multinom.fit, test.accents, "class")
+multinom.accuracy <- mean(multinom.pred == test.accents.labels)
+multinom.fit
+```
+
+
+```{r}
+## K-nearest neighbors
+set.seed(42)
+
+knn.accuracies <- vector(mode = "numeric", length=50)
+for (i in 1:50) {
+  knn.pred <-  knn(train.accents.data, test.accents.data, train.accents.labels, k = i)
+  knn.accuracies[i] = mean(knn.pred == test.accents.labels)
+}
+knnmax.accuracy <- max(knn.accuracies)
+knn1.accuracy = knn.accuracies[1]
+knn3.accuracy = knn.accuracies[3]
+knn10.accuracy = knn.accuracies[10]
+plot(knn.accuracies, xlab="k", type="b", ylab = "Accuracy", main="k-Nearest Neighbors for Different k Values")
+
+```
+
+```{r}
+# ## tree stuff ##
+# set.seed(42)
+# # train=sample(1:nrow(Carseats), 200)
+# # mydata.test=mydata[-train,]
+# # High.test=High[-train]
+# tree.fit <- tree(as.factor(language)~.,train.accents)
+# tree.pred=predict(tree.fit,test.accents,type="class")
+# table(tree.pred,test.accents.labels)
+# tree.accuracy = mean(tree.pred==test.accents.labels)
+# paste("Accuracy: ", 100*mean(tree.pred==test.accents.labels), "%")
+# summary(tree.fit)
+```
+
+```{r}
+# set.seed(42)
+# cv.fit=cv.tree(tree.fit,FUN=prune.misclass)
+# plot(cv.fit$size,cv.fit$dev,type="b")
+# best = which.min(cv.fit$dev)
+# best.index = cv.fit$size[best]
+# prune.fit=prune.misclass(tree.fit,best=best.index)
+# plot(prune.fit)
+# text(prune.fit,pretty=0)
+# cv.pred=predict(prune.fit,test.accents.data,type="class")
+# table(cv.pred,test.accents.labels)
+# cvtree.accuracy = mean(cv.pred==test.accents.labels)
+# paste("Accuracy: ", 100*mean(cv.pred==test.accents.labels), "%")
+# summary(prune.fit)
+```
+
+## let's try bagging ##
+```{r}
+set.seed(42)
+bag.fit=randomForest(as.factor(language)~.,data=train.accents,mtry=12,importance=TRUE, ntree = 500)
+bag.confusion <- bag.fit$confusion
+write.table(bag.confusion, file = "bag.confusion.txt", sep = ",", quote=F, row.names = T)
+bag.pred = predict(bag.fit,test.accents.data,type="class")
+bag.accuracy = mean(bag.pred==test.accents.labels)
+bag.accuracy
+```
+## lower mtry and we have randomforest ##
+```{r}
+set.seed(42)
+rf.fit=randomForest(as.factor(language)~.,data=train.accents,mtry=4,importance=TRUE)
+rf.fit
+rf.pred = predict(rf.fit,test.accents.data,type="class")
+rf.accuracy = mean(rf.pred==test.accents.labels)
+rf.accuracy
+rf.confusion <- rf.fit$confusion
+write.table(rf.confusion, file = "rf.confusion.txt", sep = ",", quote=F, row.names = T)
+
+rf.accuracies <- vector(mode = "numeric", length=12)
+for (i in 1:12) {
+  rf.fits=randomForest(as.factor(language)~.,data=train.accents,mtry=i,importance=TRUE)
+  rf.preds = predict(rf.fits,test.accents.data,type="class")
+  rf.accuracies[i] = mean(rf.preds==test.accents.labels)
+}
+rfmax.accuracy <- max(rf.accuracies)
+plot(rf.accuracies, xlab="mtry", ylab = "Accuracy", main="Accuracy by mtry Value", type="b")
+```
+
+
+```{r}
+## final comparison ##
+
+methods <- c("LDA", "QDA", "multinomial", "KNN (k=1)", "KNN (k=3)", "KNN (k=10)", "best KNN", "bagging", "best random forest")
+accuracies <- c(lda.accuracy, qda.accuracy, multinom.accuracy, knn1.accuracy, knn3.accuracy, knn10.accuracy, knnmax.accuracy, bag.accuracy, rfmax.accuracy)
+comparison <- t(data.frame(methods,round(accuracies, 2)))
+write.table(comparison, file = "accents.results.comparison.txt", sep = ",", quote=F, row.names = T)
+round(accuracies, 2)
+```
+
+#### Part 2: Unsupervised Learning and hybrid  #####
+
+## hierarchical clustering ##
+
+```{r}
+data.dist=dist(test.accents.data)
+table(test.accents.labels)
+table(train.accents.labels)
+table(accents.labels)
+plot(hclust(data.dist), labels=test.accents.labels, main="Complete Linkage", xlab="", sub="",ylab="")
+plot(hclust(data.dist, method="average"), labels=test.accents.labels, main="Average Linkage", xlab="", sub="",ylab="")
+plot(hclust(data.dist, method="single"), labels=test.accents.labels,  main="Single Linkage", xlab="", sub="",ylab="")
+```
+
+
+## Now we do K-means to form clusters ##
+
+```{r}
+set.seed(42)
+
+getmode <- function(v) {
+ uniqv <- unique(v)
+ uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+km.out6=kmeans(accents.data, 6, nstart=50)
+km.clusters6=km.out6$cluster
+## now see how well these line up with the actual groups
+
+km6.summary <- data.frame(cbind(accents.labels, km.clusters6))
+km6.summary$km.clusters6 = as.numeric(km6.summary$km.clusters6)
+km6.summary.table <- km6.summary%>%
+  group_by(accents.labels)%>%
+  summarize(n = n(), mode = getmode(km.clusters6), sd = sd(km.clusters6))
+km6.summary.table
+km6.summary.hist <- km6.summary
+
+table(km.clusters6)
+
+km.out3=kmeans(accents.data,2,nstart=100)
+km.clusters2=km.out3$cluster
+
+km3.summary <- data.frame(cbind(accents.labels, km.clusters2))
+km3.summary$km.clusters2 = as.numeric(km3.summary$km.clusters2)
+km3.summary.table <- km3.summary%>%
+  group_by(accents.labels)%>%
+  summarize(n = n(), mode = getmode(km.clusters2), sd = sd(km.clusters2))
+km3.summary.table
+
+table(km.clusters2)
+```
+
+### visualizing clusters ###
+
+```{r}
+library(ggplot2)
+ 
+km6.summary.hist <- km6.summary%>%
+  group_by(km.clusters6, accents.labels)%>%
+  summarise(Count = n())
+# Stacked bar plot
+ggplot(km6.summary.hist, aes(fill=km.clusters6, y=Count, x=accents.labels)) + 
+    geom_bar(position="stack", stat="identity") +
+    ggtitle("Cluster by Language Group for k=6") +
+  xlab("Accent")
+
+km3.summary.hist <- km3.summary%>%
+  group_by(km.clusters2, accents.labels)%>%
+  summarise(Count = n())
+# Stacked bar plot
+ggplot(km3.summary.hist, aes(fill=km.clusters2, y=Count, x=accents.labels)) + 
+    geom_bar(position="stack", stat="identity") +
+    ggtitle("Cluster by Language Group for k=2") +
+  xlab("Accent")
+
+```
+
+### making mclust model ###
+
+```{r}
+set.seed(42)
+Model.mclust <- Mclust(accents.data,G=1:6,startCL = "kmeans")
+plot(Model.mclust,what="classification", main="M-clust Model Using K-Means")
+summary(Model.mclust)
+Model.mclust$classification
+```
+
+## factor analysis  ##
+
+```{r}
+FA.fit <- factanal(accents.data, 4)
+ev <- eigen(cor(accents.data)) # get eigenvalues
+FA.fit$loadings
+plot(ev$values)
+```
+how linked are the coefficients to a latent set of factors...
+
+## lets reduce the dimensions with pca ##
+
+```{r}
+pr.out=prcomp(accents.data, scale=TRUE)
+?prcomp
+names(pr.out)
+# pr.out$center
+# pr.out$scale
+# pr.out$rotation
+dim(pr.out$x)
+biplot(pr.out, scale=0)
+pr.out$x
+summary(pr.out)
+```
+
+```{r}
+# pr.out$sdev
+pr.var=pr.out$sdev^2
+# pr.var
+pve=pr.var/sum(pr.var)
+# pve
+plot(pve, xlab="Principal Component", ylab="Proportion of Variance Explained", ylim=c(0,1),type='b')
+plot(cumsum(pve), xlab="Principal Component", ylab="Cumulative Proportion of Variance Explained", ylim=c(0,1),type='b')
+```
+
+### data cleaning and prep ###
+```{r}
+set.seed(42)
+accents <- read.csv("accent.recognition.csv")
+accents.data <- accents[,-1]
+accents.labels <- accents[,1]
+
+accents <- data.frame(c(accents.labels), pr.out$x[,1:8])
+names(accents)[1] = "language"
+
+subset <- sample(1:nrow(accents), 50)
+test.accents <- accents[subset,]
+train.accents <- accents[-subset,]
+
+
+label.colors <- character(10)
+label.colors[] <- "black"
+label.colors[accents.labels == "ES"] <- "red"
+label.colors[accents.labels == "GE"] <- "blue"
+label.colors[accents.labels == "IT"] <- "green"
+label.colors[accents.labels == "FR"] <- "brown"
+label.colors[accents.labels == "US"] <- "purple"
+label.colors[accents.labels == "UK"] <- "orange"
+
+test.accents.data <- test.accents[,-1]
+test.accents.labels <- test.accents[,1]
+train.accents.data <- train.accents[,-1]
+train.accents.labels <- train.accents[,1]
+
+hist(accents.data[,1])
+hist(accents.data[,2])
+hist(accents.data[,3])
+
+
+```
+```{r}
+ggpairs(accents,
+        ggplot2::aes(colour=language),
+        upper = list(continuous = wrap("density", alpha = 0.5), combo = "box"),
+        lower = list(continuous = wrap("points", alpha = 0.3,    size=0.1),
+              combo = wrap("dot", alpha = 0.4,            size=0.2) ),
+        title = "Accents")
+```
+
+
+
+#### part 2: classification using lda and logistic regression ####
+
+```{r}
+set.seed(42)
+lda.fit <-  lda(language ~ ., data = train.accents)
+lda.pred <-  predict(lda.fit, test.accents)
+lda.accuracy <- mean(lda.pred$class == test.accents.labels)
+lda.fit
+
+```
+
+```{r}
+set.seed(42)
+qda.accuracy <- 0
+qda.fit <-  qda(language ~ ., data = train.accents)
+qda.pred <-  predict(qda.fit, test.accents)
+qda.accuracy <- mean(qda.pred$class == test.accents.labels)
+qda.fit
+```
+
+```{r}
+library(nnet)
+set.seed(42)
+multinom.fit <-  multinom(language ~ ., data = train.accents)
+multinom.pred <-  predict(multinom.fit, test.accents, "class")
+multinom.accuracy <- mean(multinom.pred == test.accents.labels)
+multinom.fit
+```
+
+
+```{r}
+## K-nearest neighbors
+set.seed(42)
+
+knn.pred1 <-  knn(train.accents.data, test.accents.data, train.accents.labels, k = 1)
+knn1.accuracy <- mean(knn.pred1 == test.accents.labels)
+
+# KNN (k=10)
+knn.pred3 <-  knn(train.accents.data, test.accents.data, train.accents.labels, k = 3)
+knn3.accuracy <- mean(knn.pred3 == test.accents.labels)
+
+# KNN (k=100)
+knn.pred10 <-  knn(train.accents.data, test.accents.data, train.accents.labels, k = 10)
+knn10.accuracy <- mean(knn.pred10 == test.accents.labels)
+
+knn.accuracies <- vector(mode = "numeric", length=75)
+for (i in 1:75) {
+  knn.pred <-  knn(train.accents.data, test.accents.data, train.accents.labels, k = i)
+  knn.accuracies[i] = mean(knn.pred == test.accents.labels)
+}
+knnmax.accuracy <- max(knn.accuracies)
+plot(knn.accuracies, xlab="k")
+
+```
+
+```{r}
+## tree stuff ##
+set.seed(42)
+# train=sample(1:nrow(Carseats), 200)
+# mydata.test=mydata[-train,]
+# High.test=High[-train]
+tree.fit <- tree(as.factor(language)~.,train.accents)
+tree.fit
+tree.pred=predict(tree.fit,test.accents,type="class")
+table(tree.pred,test.accents.labels)
+tree.accuracy = mean(tree.pred==test.accents.labels)
+paste("Accuracy: ", 100*mean(tree.pred==test.accents.labels), "%")
+```
+
+```{r}
+set.seed(42)
+cv.fit=cv.tree(tree.fit,FUN=prune.misclass)
+plot(cv.fit$size,cv.fit$dev,type="b")
+best = which.min(cv.fit$dev)
+best.index = cv.fit$size[best]
+prune.fit=prune.misclass(tree.fit,best=best.index)
+plot(prune.fit)
+text(prune.fit,pretty=0)
+tree.pred=predict(prune.fit,test.accents.data,type="class")
+table(tree.pred,test.accents.labels)
+cvtree.accuracy = mean(tree.pred==test.accents.labels)
+paste("Accuracy: ", 100*mean(tree.pred==test.accents.labels), "%")
+```
+
+## let's try bagging ##
+```{r}
+set.seed(42)
+bag.fit=randomForest(as.factor(language)~.,data=train.accents,mtry=8,importance=TRUE)
+bag.fit
+bag.pred = predict(bag.fit,test.accents.data,type="class")
+bag.accuracy = mean(bag.pred==test.accents.labels)
+bag.accuracy
+```
+## lower mtry and we have randomforest ##
+```{r}
+set.seed(42)
+rf.fit=randomForest(as.factor(language)~.,data=train.accents,mtry=6,importance=TRUE)
+rf.fit
+rf.pred = predict(rf.fit,test.accents.data,type="class")
+rf.accuracy = mean(rf.pred==test.accents.labels)
+rf.accuracy
+
+rf.accuracies <- vector(mode = "numeric", length=8)
+for (i in 1:8) {
+  rf.fits=randomForest(as.factor(language)~.,data=train.accents,mtry=i,importance=TRUE)
+  rf.preds = predict(rf.fits,test.accents.data,type="class")
+  rf.accuracies[i] = mean(rf.preds==test.accents.labels)
+}
+rfmax.accuracy <- max(rf.accuracies)
+plot(rf.accuracies, xlab="mtry", title="Accuracy for each mtry value", type="b")
+```
+
+```{r}
+## final comparison ##
+
+methods <- c("LDA", "QDA", "multinomial", "KNN (k=1)", "KNN (k=3)", "KNN (k=10)", "best KNN", "bagging", "best random forest")
+accuracies <- c(lda.accuracy, qda.accuracy, multinom.accuracy, knn1.accuracy, knn3.accuracy, knn10.accuracy, knnmax.accuracy, bag.accuracy, rfmax.accuracy)
+t(data.frame(methods,accuracies))
+```
+
+
+#####################################
+
+
